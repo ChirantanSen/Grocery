@@ -1,10 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useReducer, useState, useEffect } from "react";
 import GroceryItemCard, { GroceryItem } from "./GroceryItemCard";
 import GroceryHeader from "./GroceryHeader";
 import { groceryList } from "../data/groceryList";
 import { coupons } from "../data/coupons";
+
+import {
+  cartReducer,
+  initialCartState,
+} from "../../reducers/cartReducer";
 
 import {
   Container,
@@ -20,80 +25,42 @@ import {
   DialogActions,
 } from "@mui/material";
 
-// Cart item with quantity//
-type CartItem = GroceryItem & { quantity: number };
-
 export default function GroceryCart() {
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [activeView, setActiveView] = useState<"items" | "cart">("items");
+  // 🔁 useReducer instead of multiple useState
+  const [state, dispatch] = useReducer(
+    cartReducer,
+    initialCartState
+  );
 
-  // Coupon//
+  const cart = state.items;
+  const appliedCoupon = state.appliedCoupon;
+
+  // UI-only state
+  const [activeView, setActiveView] =
+    useState<"items" | "cart">("items");
   const [couponCode, setCouponCode] = useState("");
-  const [appliedCoupon, setAppliedCoupon] =
-    useState<(typeof coupons)[number] | null>(null);
   const [showCouponModal, setShowCouponModal] = useState(false);
 
-// Bulk discount //
-  const [bulkDiscountActive, setBulkDiscountActive] = useState(false);
-
-  //  Add item//
+  // ➕ Add item
   const addItem = (item: GroceryItem) => {
-    setCart(prev => {
-      const existing = prev.find(p => p.id === item.id);
-      if (existing) {
-        return prev.map(p =>
-          p.id === item.id
-            ? { ...p, quantity: p.quantity + 1 }
-            : p
-        );
-      }
-      return [...prev, { ...item, quantity: 1 }];
-    });
+    dispatch({ type: "ADD_ITEM", payload: item });
   };
 
   const increaseQty = (id: number) => {
-    setCart(prev =>
-      prev.map(item =>
-        item.id === id
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
-      )
-    );
+    dispatch({ type: "INCREASE_QTY", payload: id });
   };
 
   const decreaseQty = (id: number) => {
-    setCart(prev =>
-      prev
-        .map(item =>
-          item.id === id
-            ? { ...item, quantity: item.quantity - 1 }
-            : item
-        )
-        .filter(item => item.quantity > 0)
-    );
+    dispatch({ type: "DECREASE_QTY", payload: id });
   };
 
-  //  Total //
+  // 💰 Total price (derived)
   const totalPrice = cart.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0
   );
 
-  //  Bulk discount eligibility //
-  const bulkDiscountEligible = totalPrice >= 500;
-
-  const bulkDiscountAmount = bulkDiscountActive
-    ? totalPrice * 0.1
-    : 0;
-
-  // Auto-disable bulk discount if cart drops below ₹500
-  useEffect(() => {
-    if (!bulkDiscountEligible && bulkDiscountActive) {
-      setBulkDiscountActive(false);
-    }
-  }, [bulkDiscountEligible, bulkDiscountActive]);
-
-  // Apply coupon //
+  // 🎟 Apply coupon
   const applyCoupon = () => {
     const found = coupons.find(
       c => c.code.toLowerCase() === couponCode.toLowerCase()
@@ -109,13 +76,26 @@ export default function GroceryCart() {
       return;
     }
 
-    setAppliedCoupon(found);
+    dispatch({ type: "APPLY_COUPON", payload: found });
   };
+
+  // 🎉 Bulk discount (₹500 → 10%)
+  const bulkDiscountEligible = totalPrice >= 500;
+
+  useEffect(() => {
+    if (!bulkDiscountEligible && state.bulkDiscountActive) {
+      dispatch({ type: "DEACTIVATE_BULK_DISCOUNT" });
+    }
+  }, [bulkDiscountEligible, state.bulkDiscountActive]);
 
   const couponDiscountAmount = appliedCoupon
     ? appliedCoupon.discountType === "percentage"
       ? (totalPrice * appliedCoupon.value) / 100
       : appliedCoupon.value
+    : 0;
+
+  const bulkDiscountAmount = state.bulkDiscountActive
+    ? totalPrice * 0.1
     : 0;
 
   const finalAmount = Math.max(
@@ -126,7 +106,7 @@ export default function GroceryCart() {
   return (
     <Container maxWidth="lg" sx={{ mt: 5 }}>
       <Typography variant="h4" fontWeight="bold" gutterBottom>
-         Grocery Store
+        🛒 Grocery Store
       </Typography>
 
       <GroceryHeader
@@ -135,7 +115,7 @@ export default function GroceryCart() {
         onChange={setActiveView}
       />
 
-      {/*  ITEMS VIEW */}
+      {/* 🟢 ITEMS VIEW */}
       {activeView === "items" && (
         <Paper
           elevation={3}
@@ -168,7 +148,7 @@ export default function GroceryCart() {
         </Paper>
       )}
 
-      {/*  CART VIEW */}
+      {/* 🟠 CART VIEW */}
       {activeView === "cart" && (
         <Paper elevation={3} sx={{ p: 3, borderRadius: 3 }}>
           {cart.map(item => (
@@ -192,11 +172,13 @@ export default function GroceryCart() {
               </Box>
 
               <Box sx={{ display: "flex", gap: 1 }}>
-                <Button size="small" onClick={() => decreaseQty(item.id)}>
+                <Button onClick={() => decreaseQty(item.id)}>
                   −
                 </Button>
-                <Typography fontWeight={600}>{item.quantity}</Typography>
-                <Button size="small" onClick={() => increaseQty(item.id)}>
+                <Typography fontWeight={600}>
+                  {item.quantity}
+                </Typography>
+                <Button onClick={() => increaseQty(item.id)}>
                   +
                 </Button>
               </Box>
@@ -205,8 +187,8 @@ export default function GroceryCart() {
 
           <Divider sx={{ my: 2 }} />
 
-          {/*  BULK DISCOUNT OFFER */}
-          {bulkDiscountEligible && !bulkDiscountActive && (
+          {/* 🎉 Bulk Discount */}
+          {bulkDiscountEligible && !state.bulkDiscountActive && (
             <Paper
               sx={{
                 mb: 2,
@@ -219,21 +201,22 @@ export default function GroceryCart() {
               }}
             >
               <Typography fontWeight={600} color="success.main">
-                 Get 10% OFF on orders above ₹500
+                🎉 Get 10% OFF on orders above ₹500
               </Typography>
-
               <Button
                 variant="contained"
                 color="success"
                 size="small"
-                onClick={() => setBulkDiscountActive(true)}
+                onClick={() =>
+                  dispatch({ type: "ACTIVATE_BULK_DISCOUNT" })
+                }
               >
                 Apply
               </Button>
             </Paper>
           )}
 
-          {/*  Coupon */}
+          {/* 🎟 Coupon */}
           <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
             <TextField
               size="small"
@@ -242,12 +225,16 @@ export default function GroceryCart() {
               value={couponCode}
               onChange={e => setCouponCode(e.target.value)}
             />
-            <Button variant="contained" color="success" onClick={applyCoupon}>
+            <Button
+              variant="contained"
+              color="success"
+              onClick={applyCoupon}
+            >
               Apply
             </Button>
           </Box>
 
-          {/*  SUMMARY */}
+          {/* 🧾 SUMMARY */}
           <Box sx={{ backgroundColor: "#f5f6f8", p: 2, borderRadius: 2 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between" }}>
               <Typography>Subtotal</Typography>
@@ -265,7 +252,7 @@ export default function GroceryCart() {
               </Box>
             )}
 
-            {bulkDiscountActive && (
+            {state.bulkDiscountActive && (
               <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                 <Typography color="success.main">
                   Bulk Discount (10%)
@@ -288,7 +275,7 @@ export default function GroceryCart() {
         </Paper>
       )}
 
-      {/*  COUPON MODAL */}
+      {/* 🚨 COUPON MODAL */}
       <Dialog
         open={showCouponModal}
         onClose={() => setShowCouponModal(false)}
